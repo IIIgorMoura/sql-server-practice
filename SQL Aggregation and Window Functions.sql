@@ -247,3 +247,65 @@ FROM (
 		CUME_DIST() OVER(ORDER BY Price DESC) AS cume_position
 	FROM Sales.Products
 )t WHERE cume_position <= 0.4;
+
+
+-- Window Value Functions
+SELECT 
+	*,
+	MonthSales - PreviousMonthSales AS MoM_Change,
+	ROUND(CAST(MonthSales - PreviousMonthSales AS FLOAT) / PreviousMonthSales * 100, 2) AS MoM_Perc
+FROM (
+	SELECT
+		MONTH(OrderDate) AS OrderMonth,
+		SUM(Sales) AS MonthSales,
+		LAG(SUM(Sales)) OVER(ORDER BY MONTH(OrderDate)) AS PreviousMonthSales
+	FROM Sales.Orders
+	GROUP BY MONTH(OrderDate)
+)t;
+
+
+-- Rank Customers based on Datediff AVG between Orders
+-- Unrefined version
+SELECT
+	*,
+	DENSE_RANK() OVER(ORDER BY COALESCE(AvgOrderDayDiffByCustomer, 999999)) AS RankLowerAvgOrderDayDiffByCustomer
+FROM (
+	SELECT
+		*,
+		AVG(OrderDayDiff) OVER(PARTITION BY CustomerID) AS AvgOrderDayDiffByCustomer
+	FROM (
+		SELECT
+			CustomerID,
+			OrderDate,
+			LAG(OrderDate, 1) OVER(PARTITION BY CustomerID ORDER BY OrderDate) AS PreviousOrder,
+			DATEDIFF(Day, LAG(OrderDate, 1) OVER(PARTITION BY CustomerID ORDER BY OrderDate), OrderDate) AS OrderDayDiff
+		FROM Sales.Orders
+	)t
+)t;
+
+-- Refined version
+SELECT
+	CustomerID,
+	AVG(OrderDayDiff) AS AvgOrderDayDiffByCustomer,
+	RANK() OVER(ORDER BY COALESCE(AVG(OrderDayDiff), 999999)) AS RankLowerAvgOrderDayDiffByCustomer
+FROM (
+	SELECT
+		CustomerID,
+		OrderDate,
+		LAG(OrderDate, 1) OVER(PARTITION BY CustomerID ORDER BY OrderDate) AS PreviousOrder,
+		DATEDIFF(Day, LAG(OrderDate, 1) OVER(PARTITION BY CustomerID ORDER BY OrderDate), OrderDate) AS OrderDayDiff
+	FROM Sales.Orders
+)t GROUP BY CustomerID;
+
+
+-- First and Last Values
+SELECT
+	OrderID,
+	ProductID,
+	Sales,
+	FIRST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales) AS LowestSaleByProduct,
+	LAST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales 
+		ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS HighestSaleByProduct,
+	-- Simpler method than LAST_VALUE
+	FIRST_VALUE(Sales) OVER(PARTITION BY ProductID ORDER BY Sales DESC) AS HighestSaleByProduct2
+FROM Sales.Orders;
